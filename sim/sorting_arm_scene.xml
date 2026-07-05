@@ -24,6 +24,7 @@
     <texture name="grid" type="2d" builtin="checker" rgb1="0.92 0.92 0.90" rgb2="0.78 0.80 0.82" width="256" height="256"/>
     <material name="table_mat" texture="grid" texrepeat="4 4" reflectance="0.1"/>
     <material name="base_mat" rgba="0.08 0.10 0.12 1"/>
+    <material name="column_mat" rgba="0.72 0.74 0.72 1"/>
     <material name="link1_mat" rgba="0.12 0.32 0.55 1"/>
     <material name="link2_mat" rgba="0.10 0.48 0.42 1"/>
     <material name="slide_mat" rgba="0.95 0.72 0.20 1"/>
@@ -50,12 +51,21 @@
 
     <!--
       SCARA robot hierarchy.
+
+      This mirrors the URDF mental model:
+      - MuJoCo body ~= URDF link
+      - MuJoCo joint ~= URDF joint
+      - nested bodies define the parent-child tree
+      - grasp_site/tool0 marks the tool-center point
+
       Joint 1: base_yaw rotates link 1 in the table plane.
       Joint 2: elbow_yaw rotates link 2 in the table plane.
       Joint 3: gripper_z slides the gripper up/down.
     -->
     <body name="arm_base" pos="-0.48 0 0.30">
-      <geom name="base_column" type="cylinder" pos="0 0 -0.15" size="0.075 0.15" material="base_mat" contype="0" conaffinity="0"/>
+      <geom name="base_footprint" type="box" pos="0 0 -0.30" size="0.13 0.13 0.025" material="base_mat" contype="0" conaffinity="0"/>
+      <geom name="base_column" type="cylinder" pos="0 0 -0.15" size="0.075 0.15" material="column_mat" contype="0" conaffinity="0"/>
+      <geom name="base_cap" type="cylinder" pos="0 0 0" size="0.085 0.02" material="base_mat" contype="0" conaffinity="0"/>
       <joint name="base_yaw" type="hinge" axis="0 0 1" range="-170 170"/>
 
       <body name="link1" pos="0 0 0.10">
@@ -63,7 +73,8 @@
         <geom name="shoulder_hub" type="cylinder" size="0.045 0.018" material="base_mat" contype="0" conaffinity="0"/>
 
         <body name="elbow" pos="0.38 0 0">
-          <geom name="elbow_hub" type="cylinder" size="0.04 0.018" material="base_mat" contype="0" conaffinity="0"/>
+          <geom name="elbow_column" type="cylinder" pos="0 0 -0.055" size="0.045 0.075" material="column_mat" contype="0" conaffinity="0"/>
+          <geom name="elbow_hub" type="cylinder" size="0.052 0.018" material="base_mat" contype="0" conaffinity="0"/>
           <joint name="elbow_yaw" type="hinge" axis="0 0 1" range="-155 155"/>
 
           <body name="link2" pos="0 0 0">
@@ -71,13 +82,18 @@
 
             <body name="vertical_slide" pos="0.36 0 0">
               <joint name="gripper_z" type="slide" axis="0 0 1" range="-0.02 0.34"/>
+              <geom name="wrist_column" type="cylinder" pos="0 0 -0.015" size="0.052 0.065" material="column_mat" contype="0" conaffinity="0"/>
+              <geom name="wrist_cap" type="cylinder" pos="0 0 0.055" size="0.058 0.018" material="base_mat" contype="0" conaffinity="0"/>
               <geom name="slide_rail" type="cylinder" pos="0 0 -0.13" size="0.018 0.16" material="slide_mat" contype="0" conaffinity="0"/>
 
               <body name="end_effector" pos="0 0 -0.22">
                 <geom name="gripper_palm" type="box" size="0.05 0.018 0.012" material="gripper_mat" contype="0" conaffinity="0"/>
                 <geom name="left_finger" type="box" pos="0 0.04 -0.028" size="0.012 0.008 0.04" material="gripper_mat" contype="0" conaffinity="0"/>
                 <geom name="right_finger" type="box" pos="0 -0.04 -0.028" size="0.012 0.008 0.04" material="gripper_mat" contype="0" conaffinity="0"/>
-                <!-- grasp_site is the point the IK solver places on each box/bin. -->
+                <!-- tool0 is the ROS/URDF-style tool frame. grasp_site is the
+                     point the IK solver places on each box/bin. They are
+                     colocated here so both conventions are visible. -->
+                <site name="tool0" pos="0 0 -0.08" size="0.008" rgba="0.2 0.8 1 0.8"/>
                 <site name="grasp_site" pos="0 0 -0.08" size="0.012" rgba="1 1 1 0.8"/>
               </body>
             </body>

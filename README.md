@@ -146,6 +146,31 @@ Later versions can replace individual modules:
 - Add predictive maintenance from joint current, temperature, cycle time, and
   gripper-force telemetry.
 
+## SCARA Modeling Notes
+
+The Version 2 MuJoCo scene follows the same tree idea used by URDF:
+
+```text
+MuJoCo body ~= URDF link
+MuJoCo joint ~= URDF joint
+nested bodies ~= parent/child link tree
+site tool0 ~= robot tool frame
+site grasp_site ~= point used by the IK script
+```
+
+The model is intentionally SCARA-like:
+
+```text
+joint 1: base_yaw, revolute around Z
+joint 2: elbow_yaw, revolute around Z
+joint 3: gripper_z, prismatic/slide along Z
+```
+
+This is close to how a ROS 2 URDF/Xacro description would be organized, but the
+file is still MuJoCo XML because MuJoCo is our current simulator. A later ROS 2
+milestone can add a dedicated `scara_description` package with URDF/Xacro and
+`ros2_control` interfaces.
+
 ## Roadmap
 
 - [x] Version 1: fake gripper sorting.
