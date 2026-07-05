@@ -54,11 +54,11 @@
       Joint 2: elbow_yaw rotates link 2 in the table plane.
       Joint 3: gripper_z slides the gripper up/down.
     -->
-    <body name="arm_base" pos="-0.48 0 0.12">
-      <geom name="base_column" type="cylinder" pos="0 0 -0.06" size="0.07 0.06" material="base_mat" contype="0" conaffinity="0"/>
+    <body name="arm_base" pos="-0.48 0 0.30">
+      <geom name="base_column" type="cylinder" pos="0 0 -0.15" size="0.075 0.15" material="base_mat" contype="0" conaffinity="0"/>
       <joint name="base_yaw" type="hinge" axis="0 0 1" range="-170 170"/>
 
-      <body name="link1" pos="0 0 0.06">
+      <body name="link1" pos="0 0 0.10">
         <geom name="link1_bar" type="capsule" fromto="0 0 0 0.38 0 0" size="0.028" material="link1_mat" contype="0" conaffinity="0"/>
         <geom name="shoulder_hub" type="cylinder" size="0.045 0.018" material="base_mat" contype="0" conaffinity="0"/>
 
@@ -71,14 +71,14 @@
 
             <body name="vertical_slide" pos="0.36 0 0">
               <joint name="gripper_z" type="slide" axis="0 0 1" range="-0.02 0.34"/>
-              <geom name="slide_rail" type="cylinder" pos="0 0 -0.055" size="0.018 0.075" material="slide_mat" contype="0" conaffinity="0"/>
+              <geom name="slide_rail" type="cylinder" pos="0 0 -0.13" size="0.018 0.16" material="slide_mat" contype="0" conaffinity="0"/>
 
-              <body name="end_effector" pos="0 0 -0.13">
+              <body name="end_effector" pos="0 0 -0.22">
                 <geom name="gripper_palm" type="box" size="0.05 0.018 0.012" material="gripper_mat" contype="0" conaffinity="0"/>
                 <geom name="left_finger" type="box" pos="0 0.04 -0.028" size="0.012 0.008 0.04" material="gripper_mat" contype="0" conaffinity="0"/>
                 <geom name="right_finger" type="box" pos="0 -0.04 -0.028" size="0.012 0.008 0.04" material="gripper_mat" contype="0" conaffinity="0"/>
                 <!-- grasp_site is the point the IK solver places on each box/bin. -->
-                <site name="grasp_site" pos="0 0 -0.075" size="0.012" rgba="1 1 1 0.8"/>
+                <site name="grasp_site" pos="0 0 -0.08" size="0.012" rgba="1 1 1 0.8"/>
               </body>
             </body>
           </body>

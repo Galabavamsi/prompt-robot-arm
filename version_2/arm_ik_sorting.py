@@ -22,11 +22,11 @@ BIN_BY_COLOR = {color: f"{color}_bin" for color in COLORS}
 
 # These numbers must match the SCARA geometry in sorting_arm_scene.xml.
 BASE_XY = np.array([-0.48, 0.0])
-BASE_Z = 0.12
+BASE_Z = 0.30
 LINK1 = 0.38
 LINK2 = 0.36
-LINK_Z_OFFSET = 0.06
-GRASP_SITE_Z_OFFSET = -0.205
+LINK_Z_OFFSET = 0.10
+GRASP_SITE_Z_OFFSET = -0.30
 
 # The cube geoms in the XML use size="0.04 0.04 0.04", so the cube half-height
 # is 4 cm. We target the grasp site just above the cube top face instead of at
