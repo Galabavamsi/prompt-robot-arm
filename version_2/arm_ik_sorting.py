@@ -28,6 +28,14 @@ LINK2 = 0.36
 LINK_Z_OFFSET = 0.06
 GRASP_SITE_Z_OFFSET = -0.205
 
+# The cube geoms in the XML use size="0.04 0.04 0.04", so the cube half-height
+# is 4 cm. We target the grasp site just above the cube top face instead of at
+# the cube center. This removes the visual "box inside gripper" offset.
+BOX_HALF_HEIGHT = 0.04
+GRASP_CLEARANCE = 0.012
+GRASP_SITE_ABOVE_BOX_CENTER = BOX_HALF_HEIGHT + GRASP_CLEARANCE
+BOX_CENTER_FROM_GRASP_SITE = np.array([0.0, 0.0, -GRASP_SITE_ABOVE_BOX_CENTER])
+
 SCARA_JOINTS = ("base_yaw", "elbow_yaw", "gripper_z")
 
 
@@ -214,7 +222,13 @@ def move_arm_to(
         set_target_marker(data, waypoint)
         set_scara_pose(model, data, solve_scara_ik(model, data, waypoint))
         if carried_box:
-            set_free_body_pose(model, data, carried_box, grasp_pos(model, data), quat)
+            set_free_body_pose(
+                model,
+                data,
+                carried_box,
+                grasp_pos(model, data) + BOX_CENTER_FROM_GRASP_SITE,
+                quat,
+            )
         render_frame(model, data, viewer)
 
 
@@ -224,10 +238,10 @@ def execute_step(model, data, viewer, step: Step) -> None:
     bin_pos = body_pos(model, data, step.target)
 
     approach_box = box_pos + np.array([0.0, 0.0, 0.24])
-    grasp_box = box_pos + np.array([0.0, 0.0, 0.055])
+    grasp_box = box_pos + np.array([0.0, 0.0, GRASP_SITE_ABOVE_BOX_CENTER])
     lift_box = box_pos + np.array([0.0, 0.0, 0.28])
     approach_bin = bin_pos + np.array([0.0, 0.0, 0.28])
-    place_bin = bin_pos + np.array([0.0, 0.0, 0.09])
+    place_bin = bin_pos + np.array([0.0, 0.0, 0.09 + GRASP_SITE_ABOVE_BOX_CENTER])
 
     print(f"Executing with SCARA IK: pick {step.color} -> place in {step.target}")
     move_arm_to(model, data, viewer, approach_box)
