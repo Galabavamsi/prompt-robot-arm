@@ -1,0 +1,62 @@
+<mujoco model="physical_ai_sorting_mvp">
+  <compiler angle="degree" coordinate="local" inertiafromgeom="true"/>
+  <option timestep="0.01" gravity="0 0 -9.81"/>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.92 0.92 0.90" rgb2="0.78 0.80 0.82" width="256" height="256"/>
+    <material name="table_mat" texture="grid" texrepeat="4 4" reflectance="0.1"/>
+    <material name="red_mat" rgba="0.85 0.12 0.10 1"/>
+    <material name="blue_mat" rgba="0.10 0.28 0.85 1"/>
+    <material name="green_mat" rgba="0.10 0.60 0.25 1"/>
+    <material name="yellow_mat" rgba="0.95 0.75 0.12 1"/>
+    <material name="bin_red_mat" rgba="0.85 0.12 0.10 0.22"/>
+    <material name="bin_blue_mat" rgba="0.10 0.28 0.85 0.22"/>
+    <material name="bin_green_mat" rgba="0.10 0.60 0.25 0.22"/>
+    <material name="bin_yellow_mat" rgba="0.95 0.75 0.12 0.22"/>
+    <material name="gripper_mat" rgba="0.08 0.08 0.08 1"/>
+  </asset>
+
+  <worldbody>
+    <light name="key" pos="0 -2.5 4" dir="0 0 -1" diffuse="0.85 0.85 0.85"/>
+    <camera name="overview" pos="0 -2.4 1.9" xyaxes="1 0 0 0 0.58 0.82"/>
+
+    <geom name="floor" type="plane" size="2.2 2.2 0.05" material="table_mat"/>
+    <geom name="table" type="box" pos="0 0 0.02" size="0.9 0.65 0.02" material="table_mat"/>
+
+    <body name="red_box" pos="-0.35 -0.18 0.09">
+      <freejoint name="red_box_joint"/>
+      <geom type="box" size="0.045 0.045 0.045" material="red_mat" mass="0.08"/>
+    </body>
+    <body name="blue_box" pos="-0.18 0.12 0.09">
+      <freejoint name="blue_box_joint"/>
+      <geom type="box" size="0.045 0.045 0.045" material="blue_mat" mass="0.08"/>
+    </body>
+    <body name="green_box" pos="-0.48 0.20 0.09">
+      <freejoint name="green_box_joint"/>
+      <geom type="box" size="0.045 0.045 0.045" material="green_mat" mass="0.08"/>
+    </body>
+    <body name="yellow_box" pos="-0.28 -0.02 0.09">
+      <freejoint name="yellow_box_joint"/>
+      <geom type="box" size="0.045 0.045 0.045" material="yellow_mat" mass="0.08"/>
+    </body>
+
+    <body name="red_bin" pos="0.34 -0.33 0.055">
+      <geom type="box" size="0.09 0.09 0.01" material="bin_red_mat" contype="0" conaffinity="0"/>
+    </body>
+    <body name="blue_bin" pos="0.34 -0.11 0.055">
+      <geom type="box" size="0.09 0.09 0.01" material="bin_blue_mat" contype="0" conaffinity="0"/>
+    </body>
+    <body name="green_bin" pos="0.34 0.11 0.055">
+      <geom type="box" size="0.09 0.09 0.01" material="bin_green_mat" contype="0" conaffinity="0"/>
+    </body>
+    <body name="yellow_bin" pos="0.34 0.33 0.055">
+      <geom type="box" size="0.09 0.09 0.01" material="bin_yellow_mat" contype="0" conaffinity="0"/>
+    </body>
+
+    <body name="gripper_marker" mocap="true" pos="-0.55 -0.45 0.32">
+      <geom name="gripper_palm" type="box" size="0.055 0.018 0.012" material="gripper_mat" contype="0" conaffinity="0"/>
+      <geom name="gripper_left_finger" type="box" pos="0 0.038 -0.03" size="0.012 0.008 0.04" material="gripper_mat" contype="0" conaffinity="0"/>
+      <geom name="gripper_right_finger" type="box" pos="0 -0.038 -0.03" size="0.012 0.008 0.04" material="gripper_mat" contype="0" conaffinity="0"/>
+    </body>
+  </worldbody>
+</mujoco>
