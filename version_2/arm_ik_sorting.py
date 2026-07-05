@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -14,20 +15,25 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 SCENE_PATH = ROOT / "sim" / "sorting_arm_scene.xml"
 
-# Same symbolic layer as Version 1: prompts mention colors, but MuJoCo
-# needs exact body names. The robot code should work with structured names.
+# Symbolic world vocabulary. Prompts mention colors; MuJoCo uses body names.
 COLORS = ("red", "blue", "green", "yellow")
 BOX_BY_COLOR = {color: f"{color}_box" for color in COLORS}
 BIN_BY_COLOR = {color: f"{color}_bin" for color in COLORS}
 
-# These are the joints our simple IK solver is allowed to move.
-# Real arms usually have 6 or 7 joints; this small arm is for learning.
-ARM_JOINTS = ("base_yaw", "shoulder_pitch", "elbow_pitch", "wrist_pitch")
+# These numbers must match the SCARA geometry in sorting_arm_scene.xml.
+BASE_XY = np.array([-0.48, 0.0])
+BASE_Z = 0.12
+LINK1 = 0.38
+LINK2 = 0.36
+LINK_Z_OFFSET = 0.06
+GRASP_SITE_Z_OFFSET = -0.205
+
+SCARA_JOINTS = ("base_yaw", "elbow_yaw", "gripper_z")
 
 
 @dataclass(frozen=True)
 class Step:
-    """One robot-readable task step produced from a human instruction."""
+    """One robot-readable pick-place instruction."""
 
     action: str
     color: str
@@ -36,7 +42,7 @@ class Step:
 
 
 def parse_instruction(instruction: str) -> list[str]:
-    """Extract the requested color order from a basic prompt."""
+    """Extract the requested color sequence from a simple prompt."""
     lowered = instruction.lower()
     order = []
     for token in re.split(r"[^a-z]+", lowered):
@@ -46,65 +52,36 @@ def parse_instruction(instruction: str) -> list[str]:
 
 
 def make_plan(instruction: str) -> list[Step]:
-    """Create pick-place steps from the parsed color order."""
+    """Convert a prompt into structured robot actions."""
     return [
         Step("pick_place", color, BOX_BY_COLOR[color], BIN_BY_COLOR[color])
         for color in parse_instruction(instruction)
     ]
 
 
-def body_id(model: mujoco.MjModel, name: str) -> int:
-    """Look up a MuJoCo body id by name."""
-    return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
+def mj_id(model: mujoco.MjModel, obj_type, name: str) -> int:
+    """Small helper for named MuJoCo lookups."""
+    return mujoco.mj_name2id(model, obj_type, name)
 
 
-def joint_id(model: mujoco.MjModel, name: str) -> int:
-    """Look up a MuJoCo joint id by name."""
-    return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
-
-
-def site_id(model: mujoco.MjModel, name: str) -> int:
-    """Look up a MuJoCo site id by name.
-
-    Sites are marker points attached to bodies. Here, grasp_site is the
-    tool-center point we want IK to move to each target.
-    """
-    return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, name)
+def joint_qaddr(model: mujoco.MjModel, joint_name: str) -> int:
+    joint_id = mj_id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+    return model.jnt_qposadr[joint_id]
 
 
 def body_pos(model: mujoco.MjModel, data: mujoco.MjData, name: str) -> np.ndarray:
-    """Read the current world-space position of a body."""
-    return data.xpos[body_id(model, name)].copy()
+    body_id = mj_id(model, mujoco.mjtObj.mjOBJ_BODY, name)
+    return data.xpos[body_id].copy()
 
 
 def body_quat(model: mujoco.MjModel, data: mujoco.MjData, name: str) -> np.ndarray:
-    """Read the current world-space orientation of a body."""
-    return data.xquat[body_id(model, name)].copy()
+    body_id = mj_id(model, mujoco.mjtObj.mjOBJ_BODY, name)
+    return data.xquat[body_id].copy()
 
 
-def controlled_addresses(model: mujoco.MjModel) -> tuple[list[int], list[int]]:
-    """Find qpos/dof addresses for the joints controlled by IK.
-
-    MuJoCo stores all joint positions and velocities in large arrays.
-    A joint name must be translated into array addresses before we can
-    read or update that joint.
-    """
-    qpos_addresses = []
-    dof_addresses = []
-    for name in ARM_JOINTS:
-        jid = joint_id(model, name)
-        qpos_addresses.append(model.jnt_qposadr[jid])
-        dof_addresses.append(model.jnt_dofadr[jid])
-    return qpos_addresses, dof_addresses
-
-
-def clamp_arm_joints(model: mujoco.MjModel, data: mujoco.MjData) -> None:
-    """Keep IK from pushing joints outside their declared limits."""
-    for name in ARM_JOINTS:
-        jid = joint_id(model, name)
-        qaddr = model.jnt_qposadr[jid]
-        lower, upper = model.jnt_range[jid]
-        data.qpos[qaddr] = np.clip(data.qpos[qaddr], lower, upper)
+def grasp_pos(model: mujoco.MjModel, data: mujoco.MjData) -> np.ndarray:
+    site_id = mj_id(model, mujoco.mjtObj.mjOBJ_SITE, "grasp_site")
+    return data.site_xpos[site_id].copy()
 
 
 def set_free_body_pose(
@@ -114,15 +91,14 @@ def set_free_body_pose(
     pos: np.ndarray,
     quat: np.ndarray | None = None,
 ) -> None:
-    """Set a box pose directly while it is being carried.
+    """Place a free body directly in the world.
 
-    This version teaches arm IK, not gripper contact physics. So the box is
-    still attached manually while carried. A later version should replace this
-    with gripper joints, contact constraints, and force/friction behavior.
+    This keeps Version 2 focused on arm IK. A future version should replace
+    this manual attachment with real gripper contacts and force control.
     """
-    jid = joint_id(model, f"{body_name}_joint")
-    qaddr = model.jnt_qposadr[jid]
-    daddr = model.jnt_dofadr[jid]
+    joint_id = mj_id(model, mujoco.mjtObj.mjOBJ_JOINT, f"{body_name}_joint")
+    qaddr = model.jnt_qposadr[joint_id]
+    daddr = model.jnt_dofadr[joint_id]
     data.qpos[qaddr : qaddr + 3] = pos
     data.qvel[daddr : daddr + 6] = 0.0
     if quat is not None:
@@ -131,71 +107,95 @@ def set_free_body_pose(
 
 
 def set_target_marker(data: mujoco.MjData, pos: np.ndarray) -> None:
-    """Move the translucent target marker so we can see the IK goal."""
     data.mocap_pos[0] = pos
     data.mocap_quat[0] = np.array([1.0, 0.0, 0.0, 0.0])
 
 
-def solve_ik(
+def clamp(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, value))
+
+
+def current_scara_qpos(model: mujoco.MjModel, data: mujoco.MjData) -> np.ndarray:
+    return np.array([data.qpos[joint_qaddr(model, name)] for name in SCARA_JOINTS])
+
+
+def choose_closest_solution(
+    current: np.ndarray,
+    candidates: list[tuple[float, float, float]],
+) -> tuple[float, float, float]:
+    """Pick the IK solution with the smallest joint motion from current pose."""
+    best = candidates[0]
+    best_cost = float("inf")
+    for candidate in candidates:
+        diff = np.array(candidate) - current
+        diff[:2] = (diff[:2] + math.pi) % (2.0 * math.pi) - math.pi
+        cost = float(np.linalg.norm(diff))
+        if cost < best_cost:
+            best = candidate
+            best_cost = cost
+    return best
+
+
+def solve_scara_ik(
     model: mujoco.MjModel,
     data: mujoco.MjData,
     target_pos: np.ndarray,
-    max_iters: int = 80,
-    tolerance: float = 0.004,
-    damping: float = 0.02,
-    step_scale: float = 0.55,
-) -> float:
-    """Position-only damped least-squares IK for the grasp site.
+) -> tuple[float, float, float]:
+    """Analytic inverse kinematics for the teaching SCARA arm.
 
-    IK asks: what joint angles put the gripper at target_pos?
+    SCARA IK is intentionally easy to reason about:
+    - solve a 2-link planar arm for X/Y
+    - solve a vertical slide for Z
 
-    This solver repeats:
-      1. measure current gripper position
-      2. compute error = target - current
-      3. ask MuJoCo for the Jacobian
-      4. update joint angles in the direction that reduces error
-
-    It controls position only, not gripper orientation. That keeps the first
-    IK lesson small enough to understand.
+    This is a better first arm for tabletop sorting than a general elbow arm.
     """
-    grasp_sid = site_id(model, "grasp_site")
-    qpos_addresses, dof_addresses = controlled_addresses(model)
+    dx, dy = target_pos[:2] - BASE_XY
+    r2 = dx * dx + dy * dy
 
-    for _ in range(max_iters):
-        # Recompute all derived kinematic quantities after any qpos change.
-        mujoco.mj_forward(model, data)
-        current_pos = data.site_xpos[grasp_sid].copy()
-        error = target_pos - current_pos
-        error_norm = float(np.linalg.norm(error))
-        if error_norm < tolerance:
-            return error_norm
+    cos_elbow = (r2 - LINK1 * LINK1 - LINK2 * LINK2) / (2.0 * LINK1 * LINK2)
+    cos_elbow = clamp(float(cos_elbow), -1.0, 1.0)
 
-        jacp = np.zeros((3, model.nv))
-        jacr = np.zeros((3, model.nv))
-        mujoco.mj_jacSite(model, data, jacp, jacr, grasp_sid)
+    elbow_options = [math.acos(cos_elbow), -math.acos(cos_elbow)]
+    candidates = []
+    for elbow in elbow_options:
+        shoulder = math.atan2(dy, dx) - math.atan2(
+            LINK2 * math.sin(elbow),
+            LINK1 + LINK2 * math.cos(elbow),
+        )
+        slide = target_pos[2] - (BASE_Z + LINK_Z_OFFSET + GRASP_SITE_Z_OFFSET)
+        slide = clamp(slide, -0.02, 0.34)
+        candidates.append((shoulder, elbow, slide))
 
-        # jacp maps joint velocity to gripper linear velocity. We keep only
-        # the columns for the arm joints, ignoring free-box joints.
-        jac = jacp[:, dof_addresses]
+    return choose_closest_solution(current_scara_qpos(model, data), candidates)
 
-        # Damping prevents unstable jumps when the arm is near singular or
-        # when the target is hard to reach.
-        regularizer = damping * np.eye(3)
-        delta = jac.T @ np.linalg.solve(jac @ jac.T + regularizer, error)
-        for qaddr, dq in zip(qpos_addresses, delta):
-            data.qpos[qaddr] += step_scale * dq
 
-        clamp_arm_joints(model, data)
-
+def set_scara_pose(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    qpos: tuple[float, float, float],
+) -> None:
+    """Write SCARA joint values directly, then recompute kinematics."""
+    for joint_name, value in zip(SCARA_JOINTS, qpos):
+        data.qpos[joint_qaddr(model, joint_name)] = value
     mujoco.mj_forward(model, data)
-    return float(np.linalg.norm(target_pos - data.site_xpos[grasp_sid]))
 
 
-def step_viewer(model, data, viewer, seconds: float = 0.01) -> None:
-    """Advance the simulator one step and redraw the viewer."""
-    mujoco.mj_step(model, data)
+def render_frame(model, data, viewer, seconds: float = 0.01) -> None:
+    """Refresh the viewer without advancing unstable dynamics.
+
+    This is the key stability change. The first arm version used mj_step(),
+    which asked MuJoCo to dynamically simulate a robot whose joints we were
+    also teleporting. That can create huge accelerations. Here we teach
+    kinematics first: set qpos -> mj_forward -> viewer sync.
+    """
+    mujoco.mj_forward(model, data)
     viewer.sync()
     time.sleep(seconds)
+
+
+def interpolate(start: np.ndarray, end: np.ndarray, frames: int):
+    for alpha in np.linspace(0.0, 1.0, frames):
+        yield (1.0 - alpha) * start + alpha * end
 
 
 def move_arm_to(
@@ -203,47 +203,37 @@ def move_arm_to(
     data,
     viewer,
     target_pos: np.ndarray,
-    frames: int = 60,
+    frames: int = 70,
     carried_box: str | None = None,
 ) -> None:
-    """Move the arm end effector through a straight-line target path.
-
-    This is still a simplification. A production system would plan a
-    collision-aware joint trajectory instead of repeatedly solving IK at
-    straight-line Cartesian waypoints.
-    """
-    grasp_sid = site_id(model, "grasp_site")
-    start = data.site_xpos[grasp_sid].copy()
+    """Move the SCARA gripper through straight-line Cartesian waypoints."""
+    start = grasp_pos(model, data)
     quat = body_quat(model, data, carried_box) if carried_box else None
 
-    for alpha in np.linspace(0.0, 1.0, frames):
-        waypoint = (1.0 - alpha) * start + alpha * target_pos
+    for waypoint in interpolate(start, target_pos, frames):
         set_target_marker(data, waypoint)
-        solve_ik(model, data, waypoint)
+        set_scara_pose(model, data, solve_scara_ik(model, data, waypoint))
         if carried_box:
-            # Manual attachment: keep the box at the gripper site.
-            set_free_body_pose(model, data, carried_box, data.site_xpos[grasp_sid].copy(), quat)
-        step_viewer(model, data, viewer)
+            set_free_body_pose(model, data, carried_box, grasp_pos(model, data), quat)
+        render_frame(model, data, viewer)
 
 
 def execute_step(model, data, viewer, step: Step) -> None:
-    """Execute one pick-place step using arm IK targets."""
+    """Execute one pick-place step."""
     box_pos = body_pos(model, data, step.source)
     bin_pos = body_pos(model, data, step.target)
 
-    # These are task-space waypoints. The planner decides where the gripper
-    # should go; IK decides how the joints should move to get there.
-    approach_box = box_pos + np.array([0.0, 0.0, 0.22])
+    approach_box = box_pos + np.array([0.0, 0.0, 0.24])
     grasp_box = box_pos + np.array([0.0, 0.0, 0.055])
-    lift_box = box_pos + np.array([0.0, 0.0, 0.30])
-    approach_bin = bin_pos + np.array([0.0, 0.0, 0.30])
-    place_bin = bin_pos + np.array([0.0, 0.0, 0.08])
+    lift_box = box_pos + np.array([0.0, 0.0, 0.28])
+    approach_bin = bin_pos + np.array([0.0, 0.0, 0.28])
+    place_bin = bin_pos + np.array([0.0, 0.0, 0.09])
 
-    print(f"Executing with IK: pick {step.color} -> place in {step.target}")
+    print(f"Executing with SCARA IK: pick {step.color} -> place in {step.target}")
     move_arm_to(model, data, viewer, approach_box)
     move_arm_to(model, data, viewer, grasp_box, frames=35)
     move_arm_to(model, data, viewer, lift_box, frames=45, carried_box=step.source)
-    move_arm_to(model, data, viewer, approach_bin, frames=80, carried_box=step.source)
+    move_arm_to(model, data, viewer, approach_bin, frames=90, carried_box=step.source)
     move_arm_to(model, data, viewer, place_bin, frames=45, carried_box=step.source)
 
     final_box_pos = bin_pos + np.array([0.0, 0.0, 0.09])
@@ -252,7 +242,6 @@ def execute_step(model, data, viewer, step: Step) -> None:
 
 
 def world_state(model, data) -> dict[str, dict[str, list[float]]]:
-    """Return the current object state in a digital-twin-friendly format."""
     return {
         box_name: {
             "color": color,
@@ -263,15 +252,15 @@ def world_state(model, data) -> dict[str, dict[str, list[float]]]:
 
 
 def main() -> None:
-    """Load the arm scene, build a plan, run IK pick-place, and show it."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--instruction", default="sort red, blue, green")
     args = parser.parse_args()
 
     model = mujoco.MjModel.from_xml_path(str(SCENE_PATH))
     data = mujoco.MjData(model)
-    # Compute initial positions for bodies and sites before reading them.
     mujoco.mj_forward(model, data)
+    home = np.array([-0.16, 0.0, 0.32])
+    set_scara_pose(model, data, solve_scara_ik(model, data, home))
 
     plan = make_plan(args.instruction)
     print("Instruction:", args.instruction)
@@ -282,10 +271,9 @@ def main() -> None:
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
         viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
-        viewer.cam.fixedcamid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_CAMERA, "overview")
+        viewer.cam.fixedcamid = mj_id(model, mujoco.mjtObj.mjOBJ_CAMERA, "overview")
 
-        home = np.array([-0.20, 0.0, 0.38])
-        move_arm_to(model, data, viewer, home, frames=80)
+        move_arm_to(model, data, viewer, home, frames=20)
 
         for step in plan:
             execute_step(model, data, viewer, step)
@@ -293,7 +281,7 @@ def main() -> None:
         print("Final world state:", world_state(model, data))
         print("Done. Close the viewer window to exit.")
         while viewer.is_running():
-            step_viewer(model, data, viewer)
+            render_frame(model, data, viewer)
 
 
 if __name__ == "__main__":

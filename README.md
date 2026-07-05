@@ -42,7 +42,7 @@ What it teaches:
 - How pick-place skills are organized as waypoints.
 - Why robots should execute structured actions, not raw language.
 
-### Version 2: Simple Arm With IK
+### Version 2: SCARA Arm With IK
 
 File:
 
@@ -56,15 +56,22 @@ Scene:
 sim/sorting_arm_scene.xml
 ```
 
-This version replaces the fake gripper with a simple 4-DOF arm. It uses
-position-only inverse kinematics to move the gripper site to each target point.
+This version replaces the fake gripper with a simple SCARA-style arm. It uses
+analytic inverse kinematics to move the gripper site to each target point.
+
+SCARA is a good first robot for tabletop sorting because the task mostly needs
+planar X/Y movement plus vertical up/down movement. This keeps the IK easier to
+understand and avoids the instability that can happen when a teaching script
+directly edits joint positions while also asking MuJoCo to simulate full robot
+dynamics.
 
 What it teaches:
 
 - End effector / tool-center-point thinking.
 - Forward kinematics vs inverse kinematics.
+- Why SCARA is convenient for tabletop sorting.
 - MuJoCo bodies, joints, sites, and free bodies.
-- Jacobian-based damped least-squares IK.
+- Analytic 2-link planar IK plus vertical slide control.
 - The difference between task planning and motion control.
 
 ## Setup

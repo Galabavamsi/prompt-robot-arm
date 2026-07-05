@@ -1,25 +1,33 @@
-<mujoco model="physical_ai_sorting_arm_ik">
+<mujoco model="physical_ai_sorting_scara_ik">
   <!--
-    Version 2 scene: a small teaching arm for inverse kinematics.
-    This is not a real industrial robot model. It is intentionally simple so
-    you can see the relationship between joints, end-effector targets, and IK.
+    Version 2 scene: a SCARA-style teaching robot for tabletop sorting.
+
+    SCARA is easier than a full 6-DOF arm for this first robotics milestone:
+    - two planar joints choose X/Y
+    - one vertical slide chooses Z
+    - the gripper points downward
+
+    That matches colored-box sorting on a table and avoids the unstable
+    dynamics we saw with the first pitch-elbow prototype.
   -->
   <compiler angle="degree" coordinate="local" inertiafromgeom="true"/>
   <option timestep="0.01" gravity="0 0 -9.81"/>
 
-  <!-- Defaults apply to joints, geoms, and motors unless overridden below. -->
+  <!-- The arm is used kinematically in Version 2, so arm geoms are visual-only.
+       We will add real actuator dynamics later after the task logic is stable. -->
   <default>
-    <joint damping="0.6" armature="0.02" limited="true"/>
+    <joint damping="1.2" armature="0.02" limited="true"/>
     <geom friction="0.8 0.02 0.001"/>
-    <motor ctrlrange="-2 2"/>
   </default>
 
-  <!-- Visual materials: table, robot, colored boxes, translucent bins. -->
   <asset>
     <texture name="grid" type="2d" builtin="checker" rgb1="0.92 0.92 0.90" rgb2="0.78 0.80 0.82" width="256" height="256"/>
     <material name="table_mat" texture="grid" texrepeat="4 4" reflectance="0.1"/>
-    <material name="arm_mat" rgba="0.18 0.22 0.26 1"/>
-    <material name="joint_mat" rgba="0.05 0.07 0.09 1"/>
+    <material name="base_mat" rgba="0.08 0.10 0.12 1"/>
+    <material name="link1_mat" rgba="0.12 0.32 0.55 1"/>
+    <material name="link2_mat" rgba="0.10 0.48 0.42 1"/>
+    <material name="slide_mat" rgba="0.95 0.72 0.20 1"/>
+    <material name="gripper_mat" rgba="0.04 0.04 0.05 1"/>
     <material name="red_mat" rgba="0.85 0.12 0.10 1"/>
     <material name="blue_mat" rgba="0.10 0.28 0.85 1"/>
     <material name="green_mat" rgba="0.10 0.60 0.25 1"/>
@@ -28,53 +36,49 @@
     <material name="bin_blue_mat" rgba="0.10 0.28 0.85 0.22"/>
     <material name="bin_green_mat" rgba="0.10 0.60 0.25 0.22"/>
     <material name="bin_yellow_mat" rgba="0.95 0.75 0.12 0.22"/>
-    <material name="target_mat" rgba="1.0 1.0 1.0 0.35"/>
+    <material name="target_mat" rgba="1.0 1.0 1.0 0.45"/>
   </asset>
 
   <worldbody>
-    <!-- Camera and lighting are part of the digital twin too. Later, camera
-         images can become the input to perception or VLA models. -->
+    <!-- Camera and lighting are part of the digital twin. Later, this camera
+         can be used for perception instead of simulator ground truth. -->
     <light name="key" pos="0 -2.5 4" dir="0 0 -1" diffuse="0.85 0.85 0.85"/>
-    <camera name="overview" pos="0 -2.4 1.75" xyaxes="1 0 0 0 0.58 0.82"/>
+    <camera name="overview" pos="0 -2.35 1.85" xyaxes="1 0 0 0 0.58 0.82"/>
 
     <geom name="floor" type="plane" size="2.2 2.2 0.05" material="table_mat"/>
     <geom name="table" type="box" pos="0 0 0.02" size="0.9 0.65 0.02" material="table_mat"/>
 
     <!--
-      Robot arm hierarchy.
-      MuJoCo bodies are nested: base -> shoulder -> elbow -> wrist -> gripper.
-      Each hinge joint adds one controllable degree of freedom.
+      SCARA robot hierarchy.
+      Joint 1: base_yaw rotates link 1 in the table plane.
+      Joint 2: elbow_yaw rotates link 2 in the table plane.
+      Joint 3: gripper_z slides the gripper up/down.
     -->
-    <body name="arm_base" pos="-0.55 0 0.08">
-      <geom name="base" type="cylinder" size="0.08 0.04" material="joint_mat"/>
-      <joint name="base_yaw" type="hinge" axis="0 0 1" range="-145 145"/>
+    <body name="arm_base" pos="-0.48 0 0.12">
+      <geom name="base_column" type="cylinder" pos="0 0 -0.06" size="0.07 0.06" material="base_mat" contype="0" conaffinity="0"/>
+      <joint name="base_yaw" type="hinge" axis="0 0 1" range="-170 170"/>
 
-      <body name="shoulder" pos="0 0 0.07">
-        <geom type="sphere" size="0.045" material="joint_mat"/>
-        <joint name="shoulder_pitch" type="hinge" axis="0 1 0" range="-35 115"/>
+      <body name="link1" pos="0 0 0.06">
+        <geom name="link1_bar" type="capsule" fromto="0 0 0 0.38 0 0" size="0.028" material="link1_mat" contype="0" conaffinity="0"/>
+        <geom name="shoulder_hub" type="cylinder" size="0.045 0.018" material="base_mat" contype="0" conaffinity="0"/>
 
-        <body name="upper_arm" pos="0 0 0">
-          <geom type="capsule" fromto="0 0 0 0.32 0 0" size="0.026" material="arm_mat"/>
+        <body name="elbow" pos="0.38 0 0">
+          <geom name="elbow_hub" type="cylinder" size="0.04 0.018" material="base_mat" contype="0" conaffinity="0"/>
+          <joint name="elbow_yaw" type="hinge" axis="0 0 1" range="-155 155"/>
 
-          <body name="elbow" pos="0.32 0 0">
-            <geom type="sphere" size="0.038" material="joint_mat"/>
-            <joint name="elbow_pitch" type="hinge" axis="0 1 0" range="-130 130"/>
+          <body name="link2" pos="0 0 0">
+            <geom name="link2_bar" type="capsule" fromto="0 0 0 0.36 0 0" size="0.024" material="link2_mat" contype="0" conaffinity="0"/>
 
-            <body name="forearm" pos="0 0 0">
-              <geom type="capsule" fromto="0 0 0 0.30 0 0" size="0.023" material="arm_mat"/>
+            <body name="vertical_slide" pos="0.36 0 0">
+              <joint name="gripper_z" type="slide" axis="0 0 1" range="-0.02 0.34"/>
+              <geom name="slide_rail" type="cylinder" pos="0 0 -0.055" size="0.018 0.075" material="slide_mat" contype="0" conaffinity="0"/>
 
-              <body name="wrist" pos="0.30 0 0">
-                <geom type="sphere" size="0.03" material="joint_mat"/>
-                <joint name="wrist_pitch" type="hinge" axis="0 1 0" range="-120 120"/>
-
-                <body name="end_effector" pos="0.12 0 0">
-                  <geom name="gripper_palm" type="box" size="0.045 0.018 0.012" material="joint_mat" contype="0" conaffinity="0"/>
-                  <geom name="left_finger" type="box" pos="0.025 0.04 -0.025" size="0.01 0.008 0.035" material="joint_mat" contype="0" conaffinity="0"/>
-                  <geom name="right_finger" type="box" pos="0.025 -0.04 -0.025" size="0.01 0.008 0.035" material="joint_mat" contype="0" conaffinity="0"/>
-                  <!-- grasp_site is the tool-center point. The IK solver tries
-                       to move this site to each pick/place target position. -->
-                  <site name="grasp_site" pos="0.035 0 -0.065" size="0.012" rgba="1 1 1 0.7"/>
-                </body>
+              <body name="end_effector" pos="0 0 -0.13">
+                <geom name="gripper_palm" type="box" size="0.05 0.018 0.012" material="gripper_mat" contype="0" conaffinity="0"/>
+                <geom name="left_finger" type="box" pos="0 0.04 -0.028" size="0.012 0.008 0.04" material="gripper_mat" contype="0" conaffinity="0"/>
+                <geom name="right_finger" type="box" pos="0 -0.04 -0.028" size="0.012 0.008 0.04" material="gripper_mat" contype="0" conaffinity="0"/>
+                <!-- grasp_site is the point the IK solver places on each box/bin. -->
+                <site name="grasp_site" pos="0 0 -0.075" size="0.012" rgba="1 1 1 0.8"/>
               </body>
             </body>
           </body>
@@ -87,8 +91,8 @@
       <geom type="sphere" size="0.018" material="target_mat" contype="0" conaffinity="0"/>
     </body>
 
-    <!-- Boxes are free bodies: each has a 6-DOF free joint so it can move
-         independently in the world. The script manually carries them for now. -->
+    <!-- Boxes are free bodies. The script attaches a box to the gripper while
+         it is carried; later we can replace that with real gripper contacts. -->
     <body name="red_box" pos="-0.35 -0.18 0.09">
       <freejoint name="red_box_joint"/>
       <geom type="box" size="0.04 0.04 0.04" material="red_mat" mass="0.06"/>
@@ -120,13 +124,4 @@
       <geom type="box" size="0.085 0.085 0.01" material="bin_yellow_mat" contype="0" conaffinity="0"/>
     </body>
   </worldbody>
-
-  <!-- Motors are declared for future control work. The current IK script writes
-       joint positions directly, then we can upgrade to actuator control later. -->
-  <actuator>
-    <motor name="base_yaw_motor" joint="base_yaw" gear="1"/>
-    <motor name="shoulder_pitch_motor" joint="shoulder_pitch" gear="1"/>
-    <motor name="elbow_pitch_motor" joint="elbow_pitch" gear="1"/>
-    <motor name="wrist_pitch_motor" joint="wrist_pitch" gear="1"/>
-  </actuator>
 </mujoco>
